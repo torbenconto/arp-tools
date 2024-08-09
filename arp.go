@@ -4,6 +4,7 @@ import (
 	"net"
 
 	"github.com/torbenconto/arp-tools/cmd/ethernet"
+	"github.com/torbenconto/arp-tools/internal/socket"
 )
 
 type Packet struct {
@@ -52,4 +53,9 @@ func NewPacket(
 	packet.EthernetHeader.EtherType = ethType
 
 	return packet
+}
+
+type Arp struct {
+	Socket *socket.Socket
+	Packet *Packet
 }

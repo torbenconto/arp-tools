@@ -1,4 +1,4 @@
-package arptools
+package socket
 
 import (
 	"net"
