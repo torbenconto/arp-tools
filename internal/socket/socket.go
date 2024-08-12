@@ -25,6 +25,10 @@ func NewSocket(intf *net.Interface, protocol int) *Socket {
 	}
 }
 
+func (s *Socket) Intf() *net.Interface {
+	return s.intf
+}
+
 func (s *Socket) Listen() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -49,4 +53,19 @@ func (s *Socket) Listen() error {
 	err = syscall.Bind(s.fd, addr)
 
 	return err
+}
+
+func (s *Socket) Write(data []byte) error {
+	_, err := syscall.Write(s.fd, data)
+	return err
+}
+
+func (s *Socket) Read(data []byte) (int, error) {
+	n, _, err := syscall.Recvfrom(s.fd, data, 0)
+
+	return n, err
+}
+
+func (s *Socket) Close() error {
+	return syscall.Close(s.fd)
 }

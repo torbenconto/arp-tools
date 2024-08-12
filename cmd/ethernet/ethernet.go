@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"net"
 
 	"github.com/josharian/native"
 )
@@ -32,8 +33,8 @@ const (
 type Opcode_t uint16
 
 const (
-	SendOpcode Opcode_t = 0
-	RecvOpcode Opcode_t = 1
+	SendOpcode Opcode_t = 1
+	RecvOpcode Opcode_t = 2
 )
 
 func Htons(i int) (uint16, error) {
@@ -41,8 +42,29 @@ func Htons(i int) (uint16, error) {
 		return 0, errors.New("htons: proto value out of range")
 	}
 
-	var b []byte
+	var b [2]byte
 	binary.BigEndian.PutUint16(b[:], uint16(i))
 
 	return native.Endian.Uint16(b[:]), nil
+}
+
+func GetIntfAddr(intf *net.Interface) (net.IP, error) {
+
+	addrs, err := intf.Addrs()
+	if err != nil {
+		return net.IP{}, err
+	}
+
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+
+		if ipNet.IP.To4() != nil && !ipNet.IP.IsLoopback() {
+			return net.IP(addr.Network()), nil
+		}
+	}
+
+	return net.IP{}, err
 }
