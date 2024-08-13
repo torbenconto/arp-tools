@@ -3,6 +3,7 @@ package arptools
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"syscall"
@@ -40,7 +41,7 @@ func NewPacket(
 	sourceMAC net.HardwareAddr,
 	sourceIP net.IP,
 ) *Packet {
-	packet := &Packet{
+	p := Packet{
 		HardwareType: hwType,
 		ProtocolType: protoType,
 		HardwareSize: hwSize,
@@ -51,36 +52,76 @@ func NewPacket(
 		SourceMAC:    sourceMAC,
 		SourceIP:     sourceIP,
 	}
+	p.EthernetHeader.EtherType = ethType
+	p.EthernetHeader.TargetMAC = targetMAC
+	p.EthernetHeader.SourceMAC = sourceMAC
 
-	packet.EthernetHeader.TargetMAC = targetMAC
-	packet.EthernetHeader.SourceMAC = sourceMAC
-	packet.EthernetHeader.EtherType = ethType
-
-	return packet
+	return &p
 }
 
-func (a *Packet) ToBytes() []byte {
+func (p *Packet) Unmarshal(data []byte) error {
+	if len(data) < 42 {
+		return errors.New("not enough data")
+	}
+
+	offset := 0
+
+	p.EthernetHeader.TargetMAC = net.HardwareAddr(data[offset : offset+6])
+	offset += 6
+	p.EthernetHeader.SourceMAC = net.HardwareAddr(data[offset : offset+6])
+	offset += 6
+	p.EthernetHeader.EtherType = ethernet.EtherType_t(binary.BigEndian.Uint16(data[offset : offset+2]))
+	offset += 2
+
+	p.HardwareType = ethernet.HardwareType_t(binary.BigEndian.Uint16(data[offset : offset+2]))
+	offset += 2
+	p.ProtocolType = ethernet.ProtocolType_t(binary.BigEndian.Uint16(data[offset : offset+2]))
+	offset += 2
+	p.HardwareSize = data[offset]
+	offset += 1
+	p.ProtocolSize = data[offset]
+	offset += 1
+	p.Opcode = ethernet.Opcode_t(binary.BigEndian.Uint16(data[offset : offset+2]))
+	offset += 2
+	p.SourceMAC = net.HardwareAddr(data[offset : offset+6])
+	offset += 6
+	p.SourceIP = net.IP(data[offset : offset+4])
+	offset += 4
+	p.TargetMAC = net.HardwareAddr(data[offset : offset+6])
+	offset += 6
+	p.TargetIP = net.IP(data[offset : offset+4])
+
+	return nil
+}
+
+func (p *Packet) Marshal() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Ethernet header
-	buf.Write(a.EthernetHeader.TargetMAC) // net.HardwareAddr is already a byte slice
-	buf.Write(a.EthernetHeader.SourceMAC) // net.HardwareAddr is already a byte slice
-	binary.Write(buf, binary.BigEndian, a.EthernetHeader.EtherType)
+	buf.Write(p.EthernetHeader.TargetMAC)
+	buf.Write(p.EthernetHeader.SourceMAC)
+	if err := binary.Write(buf, binary.BigEndian, p.EthernetHeader.EtherType); err != nil {
+		return nil, err
+	}
 
 	// ARP header
-	binary.Write(buf, binary.BigEndian, a.HardwareType)
-	binary.Write(buf, binary.BigEndian, a.ProtocolType)
-	buf.WriteByte(a.HardwareSize)
-	buf.WriteByte(a.ProtocolSize)
-	binary.Write(buf, binary.BigEndian, a.Opcode)
-	buf.Write(a.SourceMAC)      // net.HardwareAddr is already a byte slice
-	buf.Write(a.SourceIP.To4()) // Convert to 4-byte slice for IPv4
-	buf.Write(a.TargetMAC)      // net.HardwareAddr is already a byte slice
-	buf.Write(a.TargetIP.To4()) // Convert to 4-byte slice for IPv4
+	if err := binary.Write(buf, binary.BigEndian, p.HardwareType); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.BigEndian, p.ProtocolType); err != nil {
+		return nil, err
+	}
+	buf.WriteByte(p.HardwareSize)
+	buf.WriteByte(p.ProtocolSize)
+	if err := binary.Write(buf, binary.BigEndian, p.Opcode); err != nil {
+		return nil, err
+	}
+	buf.Write(p.SourceMAC)
+	buf.Write(p.SourceIP.To4())
+	buf.Write(p.TargetMAC)
+	buf.Write(p.TargetIP.To4())
 
-	fmt.Println(buf.Bytes())
-
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
 type Arp struct {
@@ -100,7 +141,7 @@ func NewArp(intf *net.Interface) *Arp {
 }
 
 /*
-Request sends a single ARP request packet (opcode 0) to broadcast. Does not read response, use Request for that.
+Request sends a single ARP request packet (opcode 1) to broadcast. Does not read response, use Request for that.
 */
 func (a *Arp) Request(ip net.IP) error {
 	addr, err := ethernet.GetIntfAddr(a.Socket.Intf())
@@ -108,7 +149,7 @@ func (a *Arp) Request(ip net.IP) error {
 		return err
 	}
 
-	emptyMac, _ := net.ParseMAC("ff:ff:ff:ff:ff:ff")
+	broadcastMac, _ := net.ParseMAC("ff:ff:ff:ff:ff:ff")
 	packet := NewPacket(
 		ethernet.ARPEtherType,
 		ethernet.EthernetHardwareType,
@@ -116,19 +157,60 @@ func (a *Arp) Request(ip net.IP) error {
 		6,
 		4,
 		ethernet.SendOpcode,
-		emptyMac,
+		broadcastMac,
 		ip,
 		a.Socket.Intf().HardwareAddr,
 		addr,
 	)
 
-	fmt.Println(packet.ToBytes())
-
-	data := packet.ToBytes()
+	data, err := packet.Marshal()
+	if err != nil {
+		return err
+	}
 
 	a.Socket.Write(data)
 
-	//TODO: convert packet to bytes and send to FF:FF:FF:FF:FF:FF
-
 	return nil
+}
+
+/*
+Read reads a single ARP frame with a return opcode (2)
+*/
+func (a *Arp) Read() (*Packet, error) {
+	buf := make([]byte, 128)
+	for {
+		n, err := a.Socket.Read(buf)
+		if err != nil {
+			return &Packet{}, err
+		}
+
+		p := &Packet{}
+		p.Unmarshal(buf[:n])
+
+		if p.Opcode == ethernet.RecvOpcode {
+			return p, nil
+		}
+
+		continue
+	}
+}
+
+/*
+Resolve uses both the Request and Read methods to resolve a given IP to a MAC
+*/
+func (a *Arp) Resolve(ip net.IP) (*Packet, error) {
+	if err := a.Request(ip); err != nil {
+		return nil, err
+	}
+
+	packet, err := a.Read()
+	if err != nil {
+		return nil, err
+	}
+
+	if packet.Opcode == ethernet.RecvOpcode && bytes.Equal(packet.TargetMAC, a.Socket.Intf().HardwareAddr) {
+		return packet, nil
+	}
+
+	return nil, fmt.Errorf("invalid ARP response or incorrect MAC address")
 }

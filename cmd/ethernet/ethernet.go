@@ -62,7 +62,7 @@ func GetIntfAddr(intf *net.Interface) (net.IP, error) {
 		}
 
 		if ipNet.IP.To4() != nil && !ipNet.IP.IsLoopback() {
-			return net.IP(addr.Network()), nil
+			return ipNet.IP.To4(), nil
 		}
 	}
 
