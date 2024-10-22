@@ -12,7 +12,8 @@ import (
 	"github.com/torbenconto/arp-tools/internal/socket"
 )
 
-var BroadcastMac, _ = net.ParseMAC("ff:ff:ff:ff:ff:ff")
+var broadcastMac, _ = net.ParseMAC("ff:ff:ff:ff:ff:ff")
+var zeroMac, _ = net.ParseMAC("00:00:00:00:00:00")
 
 type Packet struct {
 	EthernetHeader struct {
@@ -32,6 +33,8 @@ type Packet struct {
 }
 
 func NewPacket(
+	headerTargetMAC net.HardwareAddr,
+	headerSourceMAC net.HardwareAddr,
 	ethType ethernet.EtherType_t,
 	hwType ethernet.HardwareType_t,
 	protoType ethernet.ProtocolType_t,
@@ -55,8 +58,8 @@ func NewPacket(
 		SourceIP:     sourceIP,
 	}
 	p.EthernetHeader.EtherType = ethType
-	p.EthernetHeader.TargetMAC = targetMAC
-	p.EthernetHeader.SourceMAC = sourceMAC
+	p.EthernetHeader.TargetMAC = headerTargetMAC
+	p.EthernetHeader.SourceMAC = headerSourceMAC
 
 	return &p
 }
@@ -163,7 +166,7 @@ func NewArp(intf *net.Interface) *Arp {
 }
 
 /*
-Request sends a single ARP request packet (opcode 1) to broadcast. Does not read response, use Request for that.
+Request sends a single ARP request packet (opcode 1) to broadcast. Does not read response, use Resolve for that.
 */
 func (a *Arp) Request(ip net.IP) error {
 	addr, err := ethernet.GetIntfAddr(a.Socket.Intf())
@@ -172,13 +175,15 @@ func (a *Arp) Request(ip net.IP) error {
 	}
 
 	packet := NewPacket(
+		broadcastMac,
+		a.Socket.Intf().HardwareAddr,
 		ethernet.ARPEtherType,
 		ethernet.EthernetHardwareType,
 		ethernet.IPv4ProtocolType,
 		6,
 		4,
 		ethernet.SendOpcode,
-		BroadcastMac,
+		zeroMac,
 		ip,
 		a.Socket.Intf().HardwareAddr,
 		addr,
@@ -237,15 +242,17 @@ func (a *Arp) Resolve(ip net.IP) (*Packet, error) {
 }
 
 /*
-Reply sends an ARP reply to ip "sendTo" from ip "from" saying that "from" is at your interfaces MAC addr
+Reply sends an ARP reply to ip "sendTo" from ip "from" saying that "from" is at MACaddr
 */
-func (a *Arp) Reply(sendTo, from net.IP) error {
+func (a *Arp) Reply(sendTo, from net.IP, MACaddr net.HardwareAddr) error {
 	p, err := a.Resolve(sendTo)
 	if err != nil {
 		return err
 	}
 
 	packet := NewPacket(
+		p.SourceMAC,
+		MACaddr,
 		ethernet.ARPEtherType,
 		ethernet.EthernetHardwareType,
 		ethernet.IPv4ProtocolType,
@@ -254,7 +261,7 @@ func (a *Arp) Reply(sendTo, from net.IP) error {
 		ethernet.RecvOpcode,
 		p.SourceMAC,
 		sendTo,
-		a.Socket.Intf().HardwareAddr,
+		MACaddr,
 		from,
 	)
 

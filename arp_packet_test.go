@@ -28,7 +28,7 @@ func GenerateRandomIP() net.IP {
 
 func TestPacket_Marshal_Unmarshal(t *testing.T) {
 	// Create a packet
-	p1 := NewPacket(ethernet.ARPEtherType, ethernet.EthernetHardwareType, ethernet.IPv4ProtocolType, 6, 4, ethernet.SendOpcode, GenerateRandomMAC(), net.IPv4(10, 0, 0, 1), GenerateRandomMAC(), GenerateRandomIP())
+	p1 := NewPacket(GenerateRandomMAC(), GenerateRandomMAC(), ethernet.ARPEtherType, ethernet.EthernetHardwareType, ethernet.IPv4ProtocolType, 6, 4, ethernet.SendOpcode, GenerateRandomMAC(), net.IPv4(10, 0, 0, 1), GenerateRandomMAC(), GenerateRandomIP())
 
 	// Marshal the packet
 	data, err := p1.Marshal()
